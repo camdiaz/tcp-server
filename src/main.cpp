@@ -1,17 +1,18 @@
 #include <iostream>
 #include <fstream>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <cstring> // For ZeroMemory
-
-#pragma comment(lib, "ws2_32.lib")
+#include <cstring> // For memset
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h> // For inet_ntop
+#include <unistd.h>    // For close()
 
 using namespace std;
 
 // Function to log messages to a file
 void logMessage(const string &message)
 {
-    ofstream logFile("C:\\Users\\laudi\\Documents\\tcp_server\\src\\server.log", ios_base::app);
+    ofstream logFile("/home/backend/Documentos/tcp-server/src/server.log", ios_base::app);
     if (logFile.is_open())
     {
         logFile << message << endl;
@@ -25,80 +26,69 @@ void logMessage(const string &message)
 
 int main()
 {
-    // Initialize Winsock
-    WSADATA wsData;
-    WORD ver = MAKEWORD(2, 2);
-    int wsOk = WSAStartup(ver, &wsData);
-    if (wsOk != 0)
-    {
-        logMessage("Can't initialize winsock!");
-        return 1; // Return a non-zero value to indicate failure
-    }
-
     // Create a socket
-    SOCKET listening = socket(AF_INET, SOCK_STREAM, 0);
-    if (listening == INVALID_SOCKET)
+    int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket < 0)
     {
         logMessage("Can't create a socket");
-        WSACleanup();
         return 1;
     }
 
     // Bind the IP address and port to a socket
-    sockaddr_in hint;
-    ZeroMemory(&hint, sizeof(hint)); // Clear memory
-    hint.sin_family = AF_INET;
-    hint.sin_port = htons(54000);
-    hint.sin_addr.s_addr = INADDR_ANY;
+    sockaddr_in serverAddr;
+    memset(&serverAddr, 0, sizeof(serverAddr)); // Clear memory
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(54000);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(listening, (sockaddr *)&hint, sizeof(hint)) == SOCKET_ERROR)
+    if (bind(serverSocket, (sockaddr *)&serverAddr, sizeof(serverAddr)) < 0)
     {
         logMessage("Bind failed");
-        closesocket(listening);
-        WSACleanup();
+        close(serverSocket);
         return 1;
     }
 
-    // Tell Winsock the socket is for listening
-    if (listen(listening, SOMAXCONN) == SOCKET_ERROR)
+    // Tell the socket to listen for incoming connections
+    if (listen(serverSocket, SOMAXCONN) < 0)
     {
         logMessage("Listen failed");
-        closesocket(listening);
-        WSACleanup();
+        close(serverSocket);
         return 1;
     }
 
     // Wait for a connection
-    sockaddr_in client;
-    int clientSize = sizeof(client);
-    SOCKET clientSocket = accept(listening, (sockaddr *)&client, &clientSize);
-    if (clientSocket == INVALID_SOCKET)
+    sockaddr_in clientAddr;
+    socklen_t clientSize = sizeof(clientAddr);
+    int clientSocket = accept(serverSocket, (sockaddr *)&clientAddr, &clientSize);
+    if (clientSocket < 0)
     {
         logMessage("Accept failed");
-        closesocket(listening);
-        WSACleanup();
+        close(serverSocket);
         return 1;
     }
 
-    char host[NI_MAXHOST];
-    ZeroMemory(host, NI_MAXHOST);
+    char host[INET_ADDRSTRLEN];
+    memset(host, 0, INET_ADDRSTRLEN);
 
-    string clientInfo = string(inet_ntoa(client.sin_addr)) + " connected on port " + to_string(ntohs(client.sin_port));
+    // Convert IP address to string
+    inet_ntop(AF_INET, &clientAddr.sin_addr, host, INET_ADDRSTRLEN);
+
+    string clientInfo = string(host) + " connected on port " + to_string(ntohs(clientAddr.sin_port));
     logMessage(clientInfo);
     cout << clientInfo << endl;
 
     // Close listening socket
-    closesocket(listening);
+    close(serverSocket);
 
     // While loop: accept and echo message back to client
     char buf[4096];
     while (true)
     {
-        ZeroMemory(buf, 4096);
+        memset(buf, 0, 4096);
 
         // Wait for client to send data
         int bytesReceived = recv(clientSocket, buf, 4096, 0);
-        if (bytesReceived == SOCKET_ERROR)
+        if (bytesReceived < 0)
         {
             logMessage("Error in recv().");
             break;
@@ -116,9 +106,7 @@ int main()
     }
 
     // Close the socket
-    closesocket(clientSocket);
+    close(clientSocket);
 
-    // Cleanup Winsock
-    WSACleanup();
     return 0; // Return 0 to indicate success
 }
